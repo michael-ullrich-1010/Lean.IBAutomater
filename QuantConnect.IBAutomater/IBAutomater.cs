@@ -52,6 +52,7 @@ namespace QuantConnect.IBAutomater
         private readonly AutoResetEvent _ibAutomaterInitializeEvent = new AutoResetEvent(false);
         private bool _isRestartInProgress;
         private bool _isFirstStart = true;
+        private bool _isIbgwLaunchedByMe = true;
         private volatile bool _isAuthenticating;
 
         private enum Region { America, Europe, Asia }
@@ -223,10 +224,19 @@ namespace QuantConnect.IBAutomater
 
             StopGatewayRestartTimeoutMonitor();
 
-            // remove Java agent setting from IB configuration file
-            UpdateIbGatewayConfiguration(GetIbGatewayVersionPath(), false, false);
+            // If we did NOT launch IBGateway ourselves, skip shutdown/rollback of configuration
+            if (_isIbgwLaunchedByMe)
+            {
+                // remove Java agent setting from IB configuration file
+                UpdateIbGatewayConfiguration(GetIbGatewayVersionPath(), false, false);
 
-            RenameIbGatewayProgram(true);
+                RenameIbGatewayProgram(true);
+            }
+            else
+            {
+                OutputDataReceived?.Invoke(this, new OutputDataReceivedEventArgs(
+                    "Dispose(): Skipping IBGateway configuration rollback because gateway was not launched by this instance."));
+            }
         }
 
         /// <summary>
@@ -253,6 +263,7 @@ namespace QuantConnect.IBAutomater
                 if (isGatewayRunning)
                 {
                     OutputDataReceived?.Invoke(this, new OutputDataReceivedEventArgs($"IBGateway already listening on {_host}:{_portNumber}; skipping start."));
+                    _isIbgwLaunchedByMe = false;
                     return StartResult.Success;
                 }
                 
@@ -777,7 +788,8 @@ namespace QuantConnect.IBAutomater
         /// </summary>
         public void SoftRestart()
         {
-            if (_isDisposeCalled || _gatewaySoftRestartTokenSource != null && !_gatewaySoftRestartTokenSource.IsCancellationRequested)
+            // Do not attempt soft restarts if we didn't launch the gateway
+            if (!_isIbgwLaunchedByMe || _isDisposeCalled || _gatewaySoftRestartTokenSource != null && !_gatewaySoftRestartTokenSource.IsCancellationRequested)
             {
                 return;
             }
