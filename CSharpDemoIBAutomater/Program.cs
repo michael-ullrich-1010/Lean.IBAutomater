@@ -24,14 +24,15 @@ namespace CSharpDemoIBAutomater
         {
             // IBAutomater settings
             var ibDirectory = IsLinux ? "~/Jts" : "C:\\Jts";
-            var ibVersion = "974";
+            var ibVersion = "1041";
             var ibUserName = "myusername";
             var ibPassword = "mypassword";
             var ibTradingMode = "paper";
+            var ibHost = "127.0.0.1";
             var ibPort = 4002;
 
             // Create a new instance of the IBAutomater class
-            using var automater = new IBAutomater(ibDirectory, ibVersion, ibUserName, ibPassword, ibTradingMode, ibPort, false);
+            using var automater = new IBAutomater(ibDirectory, ibVersion, ibUserName, ibPassword, ibTradingMode, ibHost, ibPort, false);
 
             // Attach the event handlers
             automater.OutputDataReceived += (s, e) => Console.WriteLine($"{DateTime.UtcNow:O} {e.Data}");
@@ -48,9 +49,9 @@ namespace CSharpDemoIBAutomater
             }
 
             // Stop the IBAutomater
-            automater.Stop();
+            //automater.Stop();
 
-            Console.WriteLine("IBAutomater stopped");
+            //Console.WriteLine("IBAutomater stopped");
         }
 
         private static bool IsLinux

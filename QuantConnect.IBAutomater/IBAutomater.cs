@@ -13,17 +13,17 @@
  * limitations under the License.
 */
 
+using Newtonsoft.Json.Linq;
+using NodaTime;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Net.NetworkInformation;
 using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
-using Newtonsoft.Json.Linq;
-using NodaTime;
-using System.Net.Sockets;
 
 namespace QuantConnect.IBAutomater
 {
@@ -249,8 +249,12 @@ namespace QuantConnect.IBAutomater
         {
             lock (_locker)
             {
-                bool isGatewayRunning = IsGatewayAlreadyRunning(_host, _portNumber);
-                OutputDataReceived?.Invoke(this, new OutputDataReceivedEventArgs($"InteractiveBrokersBrokerage.Connect(): IsGatewayAlreadyRunning({_host},{_portNumber})={isGatewayRunning}"));
+                var isGatewayRunning = IsGatewayAlreadyRunning(_host, _portNumber);
+                if (isGatewayRunning)
+                {
+                    OutputDataReceived?.Invoke(this, new OutputDataReceivedEventArgs($"IBGateway already listening on {_host}:{_portNumber}; skipping start."));
+                    return StartResult.Success;
+                }
                 
                 if (!_renamedIbGatewayExcecutable)
                 {
@@ -288,7 +292,7 @@ namespace QuantConnect.IBAutomater
                     return StartResult.Success;
                 }               
 
-                 _process = null;
+                _process = null;
                 _ibAutomaterInitializeEvent.Reset();
 
                 if (IsLinux)
@@ -946,18 +950,22 @@ namespace QuantConnect.IBAutomater
             }
         }
 
-        // NEW: detect if IBGW API is listening on localhost:port
+        // SAFE: Detect if the IB Gateway API port is already listening without opening a TCP session.
+        // The previous implementation performed a real connect which could consume/lock an API slot in IBGW.
         private static bool IsGatewayAlreadyRunning(string host, int port)
         {
             try
             {
-                var targetHost = string.Equals(host, "LOCALHOST", StringComparison.OrdinalIgnoreCase) ? "127.0.0.1" : host;
-                using var client = new TcpClient();
-                var ar = client.BeginConnect(targetHost, port, null, null);
-                var ok = ar.AsyncWaitHandle.WaitOne(TimeSpan.FromMilliseconds(500));
-                if (!ok) return false;
-                client.EndConnect(ar);
-                return true;
+                // Only inspect local endpoints; remote probing should not be done here
+                if (!(string.Equals(host, "LOCALHOST", StringComparison.OrdinalIgnoreCase) ||
+                      string.Equals(host, "127.0.0.1") ||
+                      string.Equals(host, "::1")))
+                {
+                    return false;
+                }
+
+                var props = IPGlobalProperties.GetIPGlobalProperties();
+                return props.GetActiveTcpListeners().Any(ep => ep.Port == port);
             }
             catch
             {
