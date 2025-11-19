@@ -332,4 +332,4 @@ ASALocalRun/
 /java/IBAutomater/build/
 /java/IBAutomater/dist/
 /java/IBAutomater/out/
-*.jar
+/java/**.jar

@@ -23,6 +23,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Newtonsoft.Json.Linq;
 using NodaTime;
+using System.Net.Sockets;
 
 namespace QuantConnect.IBAutomater
 {
@@ -39,6 +40,7 @@ namespace QuantConnect.IBAutomater
         private readonly string _userName;
         private readonly string _password;
         private readonly string _tradingMode;
+        private readonly string _host;        
         private readonly int _portNumber;
         private readonly bool _exportIbGatewayLogs;
 
@@ -73,7 +75,7 @@ namespace QuantConnect.IBAutomater
         };
 
         private string _ibServerName;
-        private Region _ibServerRegion = Region.America;
+        private Region _ibServerRegion = Region.Europe;
 
         private static readonly DateTimeZone TimeZoneNewYork = DateTimeZoneProviders.Tzdb["America/New_York"];
         private static readonly DateTimeZone TimeZoneZurich = DateTimeZoneProviders.Tzdb["Europe/Zurich"];
@@ -128,6 +130,7 @@ namespace QuantConnect.IBAutomater
             var userName = config["ib-user-name"].ToString();
             var password = config["ib-password"].ToString();
             var tradingMode = config["ib-trading-mode"].ToString();
+            var host = config["ib-host"].ToString();
             var portNumber = config["ib-port"].ToObject<int>();
             var ibVersion = "974";
             if (config["ib-version"] != null)
@@ -137,7 +140,7 @@ namespace QuantConnect.IBAutomater
             var exportIbGatewayLogs = config["ib-export-ibgateway-logs"].ToObject<bool>();
 
             // Create a new instance of the IBAutomater class
-            using var automater = new IBAutomater(ibDirectory, ibVersion, userName, password, tradingMode, portNumber, exportIbGatewayLogs);
+            using var automater = new IBAutomater(ibDirectory, ibVersion, userName, password, tradingMode, host, portNumber, exportIbGatewayLogs);
 
             // Attach the event handlers
             automater.OutputDataReceived += (s, e) => Console.WriteLine($"{DateTime.UtcNow:O} {e.Data}");
@@ -180,13 +183,22 @@ namespace QuantConnect.IBAutomater
         /// <param name="tradingMode">The trading mode ('paper' or 'live')</param>
         /// <param name="portNumber">The API port number</param>
         /// <param name="exportIbGatewayLogs">Export IB Gateway logs if true</param>
-        public IBAutomater(string ibDirectory, string ibVersion, string userName, string password, string tradingMode, int portNumber, bool exportIbGatewayLogs)
+        public IBAutomater(
+            string ibDirectory, 
+            string ibVersion, 
+            string userName, 
+            string password, 
+            string tradingMode, 
+            string host,
+            int portNumber, 
+            bool exportIbGatewayLogs)
         {
             _ibDirectory = ibDirectory;
             _ibVersion = ibVersion;
             _userName = userName;
             _password = password;
             _tradingMode = tradingMode;
+            _host = host;
             _portNumber = portNumber;
             _exportIbGatewayLogs = exportIbGatewayLogs;
 
@@ -237,6 +249,9 @@ namespace QuantConnect.IBAutomater
         {
             lock (_locker)
             {
+                bool isGatewayRunning = IsGatewayAlreadyRunning(_host, _portNumber);
+                OutputDataReceived?.Invoke(this, new OutputDataReceivedEventArgs($"InteractiveBrokersBrokerage.Connect(): IsGatewayAlreadyRunning({_host},{_portNumber})={isGatewayRunning}"));
+                
                 if (!_renamedIbGatewayExcecutable)
                 {
                     CleanUpIbGatewayExcecutable();
@@ -271,19 +286,19 @@ namespace QuantConnect.IBAutomater
                 if (IsRunning())
                 {
                     return StartResult.Success;
-                }
+                }               
 
-                _process = null;
+            _process = null;
                 _ibAutomaterInitializeEvent.Reset();
 
-                if (IsLinux)
-                {
-                    // need permission for execution
-                    OutputDataReceived?.Invoke(this, new OutputDataReceivedEventArgs("Setting execute permissions on IBAutomater.sh"));
-                    ExecuteProcessAndWaitForExit("chmod", $"+x {ibAutomaterPath}");
-                }
+            if (IsLinux)
+            {
+                // need permission for execution
+                OutputDataReceived?.Invoke(this, new OutputDataReceivedEventArgs("Setting execute permissions on IBAutomater.sh"));
+                ExecuteProcessAndWaitForExit("chmod", $"+x {ibAutomaterPath}");
+            }
 
-                var ibGatewayVersionPath = GetIbGatewayVersionPath();
+            var ibGatewayVersionPath = GetIbGatewayVersionPath();
 
                 OutputDataReceived?.Invoke(this, new OutputDataReceivedEventArgs($"Loading IBGateway - Version: {_ibVersion} - Path: {ibGatewayVersionPath} - User: {_userName}"));
 
@@ -299,7 +314,7 @@ namespace QuantConnect.IBAutomater
                 }
 
                 UpdateIbGatewayIniFile();
-                var javaAgent = UpdateIbGatewayConfiguration(ibGatewayVersionPath, true, isRestart);
+            var javaAgent = UpdateIbGatewayConfiguration(ibGatewayVersionPath, true, isRestart);
 
                 _timerLogReader.Change(Timeout.Infinite, Timeout.Infinite);
 
@@ -315,18 +330,18 @@ namespace QuantConnect.IBAutomater
 
                 _timerLogReader.Change(TimeSpan.Zero, TimeSpan.FromSeconds(1));
 
-                string fileName;
-                var arguments = $"-J-DjtsConfigDir={ibGatewayVersionPath}";
-                var ibGatewayExecutablePath = GetIbGatewayExecutablePath();
-                if (IsWindows)
-                {
-                    fileName = ibGatewayExecutablePath;
-                }
-                else
-                {
-                    fileName = ibAutomaterPath;
-                    arguments = $"{ibGatewayExecutablePath} {javaAgent} {arguments}";
-                }
+            string fileName;
+            var arguments = $"-J-DjtsConfigDir={ibGatewayVersionPath}";
+            var ibGatewayExecutablePath = GetIbGatewayExecutablePath();
+            if (IsWindows)
+            {
+                fileName = ibGatewayExecutablePath;
+            }
+            else
+            {
+                fileName = ibAutomaterPath;
+                arguments = $"{ibGatewayExecutablePath} {javaAgent} {arguments}";
+            }
 
                 if (isRestart)
                 {
@@ -928,6 +943,25 @@ namespace QuantConnect.IBAutomater
                 }
 
                 return !exited;
+            }
+        }
+
+        // NEW: detect if IBGW API is listening on localhost:port
+        private static bool IsGatewayAlreadyRunning(string host, int port)
+        {
+            try
+            {
+                var targetHost = string.Equals(host, "LOCALHOST", StringComparison.OrdinalIgnoreCase) ? "127.0.0.1" : host;
+                using var client = new TcpClient();
+                var ar = client.BeginConnect(targetHost, port, null, null);
+                var ok = ar.AsyncWaitHandle.WaitOne(TimeSpan.FromMilliseconds(500));
+                if (!ok) return false;
+                client.EndConnect(ar);
+                return true;
+            }
+            catch
+            {
+                return false;
             }
         }
 
