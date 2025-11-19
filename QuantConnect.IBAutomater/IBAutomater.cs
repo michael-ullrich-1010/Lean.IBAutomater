@@ -288,17 +288,17 @@ namespace QuantConnect.IBAutomater
                     return StartResult.Success;
                 }               
 
-            _process = null;
+                 _process = null;
                 _ibAutomaterInitializeEvent.Reset();
 
-            if (IsLinux)
-            {
-                // need permission for execution
-                OutputDataReceived?.Invoke(this, new OutputDataReceivedEventArgs("Setting execute permissions on IBAutomater.sh"));
-                ExecuteProcessAndWaitForExit("chmod", $"+x {ibAutomaterPath}");
-            }
+                if (IsLinux)
+                {
+                    // need permission for execution
+                    OutputDataReceived?.Invoke(this, new OutputDataReceivedEventArgs("Setting execute permissions on IBAutomater.sh"));
+                    ExecuteProcessAndWaitForExit("chmod", $"+x {ibAutomaterPath}");
+                }
 
-            var ibGatewayVersionPath = GetIbGatewayVersionPath();
+                var ibGatewayVersionPath = GetIbGatewayVersionPath();
 
                 OutputDataReceived?.Invoke(this, new OutputDataReceivedEventArgs($"Loading IBGateway - Version: {_ibVersion} - Path: {ibGatewayVersionPath} - User: {_userName}"));
 
@@ -314,7 +314,7 @@ namespace QuantConnect.IBAutomater
                 }
 
                 UpdateIbGatewayIniFile();
-            var javaAgent = UpdateIbGatewayConfiguration(ibGatewayVersionPath, true, isRestart);
+                var javaAgent = UpdateIbGatewayConfiguration(ibGatewayVersionPath, true, isRestart);
 
                 _timerLogReader.Change(Timeout.Infinite, Timeout.Infinite);
 
@@ -330,18 +330,18 @@ namespace QuantConnect.IBAutomater
 
                 _timerLogReader.Change(TimeSpan.Zero, TimeSpan.FromSeconds(1));
 
-            string fileName;
-            var arguments = $"-J-DjtsConfigDir={ibGatewayVersionPath}";
-            var ibGatewayExecutablePath = GetIbGatewayExecutablePath();
-            if (IsWindows)
-            {
-                fileName = ibGatewayExecutablePath;
-            }
-            else
-            {
-                fileName = ibAutomaterPath;
-                arguments = $"{ibGatewayExecutablePath} {javaAgent} {arguments}";
-            }
+                string fileName;
+                var arguments = $"-J-DjtsConfigDir={ibGatewayVersionPath}";
+                var ibGatewayExecutablePath = GetIbGatewayExecutablePath();
+                if (IsWindows)
+                {
+                    fileName = ibGatewayExecutablePath;
+                }
+                else
+                {
+                    fileName = ibAutomaterPath;
+                    arguments = $"{ibGatewayExecutablePath} {javaAgent} {arguments}";
+                }
 
                 if (isRestart)
                 {
